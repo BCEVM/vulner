@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from termcolor import colored
 from bs4 import BeautifulSoup
 
+GITHUB_REPO = "https://github.com/BCEVM/vulner.git"
+
 def print_banner():
     banner = """
     ===========================================
@@ -14,7 +16,7 @@ def print_banner():
     |                                         |
     ===========================================
     """
-    print(colored(banner, 'cyan'))
+    print(colored(banner, 'red'))
 
 def run_subfinder(domain):
     try:
@@ -66,7 +68,7 @@ def scan_logs(url):
 
 def scan_with_owasp_zap(url):
     try:
-        zap_api_key = 'your_zap_api_key'
+        zap_api_key = 'tl2291dvtq639dv9fnaaovnfii'
         zap_base_url = 'http://localhost:8080'
         start_scan_url = f"{zap_base_url}/JSON/ascan/action/scan/?url={url}&apikey={zap_api_key}"
         response = requests.get(start_scan_url)
@@ -134,7 +136,7 @@ def main():
 
     print(colored("Starting vulnerability scans...", 'green'))
     vulnerabilities = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=100) as executor:
         results = list(executor.map(scan_url, filtered_urls))
         for url, issues in results:
             if issues:
