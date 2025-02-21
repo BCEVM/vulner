@@ -77,7 +77,7 @@ def scan_logs(url):
 
 def generate_report(vulnerabilities, output_file):
     with open(output_file, 'w') as file:
-        file.write("Klandestine by BCEVM - Vulnerability Scan Report\n")
+        file.write("Vulnerability Scan Report\n")
         file.write("===========================================\n\n")
         for url, issues in vulnerabilities.items():
             file.write(f"URL: {url}\n")
