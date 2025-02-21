@@ -1,31 +1,36 @@
 import subprocess
 import requests
-import re
-from urllib.parse import urljoin
-from bs4 import BeautifulSoup
 import json
+from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 from termcolor import colored
+from bs4 import BeautifulSoup
 
-def run_subfinder(target):
+def print_banner():
+    banner = """
+    ===========================================
+    |                                         |
+    |   BCEVM Scanner - Hactivist Indonesia   |
+    |                                         |
+    ===========================================
+    """
+    print(colored(banner, 'cyan'))
+
+def run_subfinder(domain):
     try:
-        result = subprocess.run(["subfinder", "-d", target, "-silent"], capture_output=True, text=True)
+        result = subprocess.run(["subfinder", "-d", domain, "-silent"], capture_output=True, text=True)
         return result.stdout.splitlines()
     except Exception as e:
-        print(f"Error running subfinder: {e}")
+        print(colored(f"Error running subfinder: {e}", 'red'))
         return []
 
 def run_httpx(subdomains):
     try:
         result = subprocess.run(["httpx", "-silent", "-json"], input="\n".join(subdomains), text=True, capture_output=True)
-        active_subdomains = []
-        for line in result.stdout.splitlines():
-            data = json.loads(line)
-            if data.get("url"):
-                active_subdomains.append(data["url"])
+        active_subdomains = [json.loads(line)["url"] for line in result.stdout.splitlines()]
         return active_subdomains
     except Exception as e:
-        print(f"Error running httpx: {e}")
+        print(colored(f"Error running httpx: {e}", 'red'))
         return []
 
 def run_waybackurls(subdomains):
@@ -36,7 +41,7 @@ def run_waybackurls(subdomains):
             urls.extend(result.stdout.splitlines())
         return urls
     except Exception as e:
-        print(f"Error running waybackurls: {e}")
+        print(colored(f"Error running waybackurls: {e}", 'red'))
         return []
 
 def filter_urls(urls):
@@ -44,81 +49,100 @@ def filter_urls(urls):
         result = subprocess.run(["uro"], input="\n".join(urls), text=True, capture_output=True)
         return result.stdout.splitlines()
     except Exception as e:
-        print(f"Error running uro: {e}")
+        print(colored(f"Error running uro: {e}", 'red'))
         return []
 
 def scan_logs(url):
     potential_paths = ["/logs", "/log.txt", "/error.log", "/access.log", "/admin", "/login"]
     for path in potential_paths:
+        full_url = urljoin(url, path)
         try:
-            full_url = urljoin(url, path)
             response = requests.get(full_url, timeout=5)
             if response.status_code == 200 and len(response.text) > 0:
-                return True, path, "Medium"
+                return True, full_url
         except requests.RequestException:
             pass
-    return False, None, None
+    return False, None
+
+def scan_with_owasp_zap(url):
+    try:
+        zap_api_key = 'your_zap_api_key'
+        zap_base_url = 'http://localhost:8080'
+        start_scan_url = f"{zap_base_url}/JSON/ascan/action/scan/?url={url}&apikey={zap_api_key}"
+        response = requests.get(start_scan_url)
+        if response.status_code == 200:
+            return True
+    except Exception as e:
+        print(colored(f"Error running OWASP ZAP scan: {e}", 'red'))
+    return False
 
 def scan_url(url):
     issues = []
-    print(f"Scanning {url}...")
-    logs_found, log_payload, log_severity = scan_logs(url)
+    print(colored(f"Scanning {url}...", 'yellow'))
+
+    logs_found, log_url = scan_logs(url)
     if logs_found:
-        issues.append(("Logs Found", log_payload, log_severity))
+        issues.append(("Logs Found", log_url, "Medium"))
+
+    zap_scan_started = scan_with_owasp_zap(url)
+    if zap_scan_started:
+        issues.append(("OWASP ZAP Scan Initiated", url, "High"))
+
     return url, issues
 
 def generate_report(vulnerabilities, output_file):
     with open(output_file, 'w') as file:
-        file.write("Klandestine by BCEVM - Vulnerability Scan Report\n")
+        file.write("BCEVM - Vulnerability Scan Report\n")
         file.write("===========================================\n\n")
         for url, issues in vulnerabilities.items():
             file.write(f"URL: {url}\n")
             if issues:
                 file.write("Vulnerabilities Found:\n")
-                for issue, payload, severity in issues:
+                for issue, detail, severity in issues:
                     file.write(f"  - {issue} (Severity: {severity})")
-                    if payload:
-                        file.write(f" (Payload: {payload})")
+                    if detail:
+                        file.write(f" (Detail: {detail})")
                     file.write("\n")
             file.write("\n")
 
 def display_vulnerabilities(vulnerabilities):
     for url, issues in vulnerabilities.items():
         if issues:
-            print(colored(f"URL: {url}", "cyan"))
-            for issue, payload, severity in issues:
+            print(colored(f"\nURL: {url}", "cyan"))
+            for issue, detail, severity in issues:
                 color = "yellow" if severity == "Low" else "blue" if severity == "Medium" else "red" if severity == "High" else "magenta"
                 print(colored(f"  - {issue} (Severity: {severity})", color))
-                if payload:
-                    print(colored(f"    Payload: {payload}", color))
+                if detail:
+                    print(colored(f"    Detail: {detail}", color))
 
 def main():
+    print_banner()
     target = input("Enter target domain: ").strip()
     output_file = input("Enter output filename (e.g., results.txt): ").strip()
-    
-    print("Running Subfinder...")
+
+    print(colored("Running Subfinder...", 'green'))
     subdomains = run_subfinder(target)
-    
-    print("Running Httpx...")
+
+    print(colored("Running Httpx...", 'green'))
     active_subdomains = run_httpx(subdomains)
-    
-    print("Running Waybackurls...")
+
+    print(colored("Running Waybackurls...", 'green'))
     urls = run_waybackurls(active_subdomains)
-    
-    print("Filtering URLs...")
+
+    print(colored("Filtering URLs...", 'green'))
     filtered_urls = filter_urls(urls)
-    
-    print("Starting vulnerability scans...")
+
+    print(colored("Starting vulnerability scans...", 'green'))
     vulnerabilities = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
         results = list(executor.map(scan_url, filtered_urls))
         for url, issues in results:
             if issues:
                 vulnerabilities[url] = issues
-    
+
     display_vulnerabilities(vulnerabilities)
     generate_report(vulnerabilities, output_file)
-    print(f"Scan complete. Report saved to {output_file}")
+    print(colored(f"\nScan complete. Report saved to {output_file}", 'green'))
 
 if __name__ == "__main__":
     main()
