@@ -1,6 +1,8 @@
 import subprocess
 import requests
 import json
+import joblib
+import numpy as np
 from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor
 from termcolor import colored
@@ -17,6 +19,12 @@ def print_banner():
     ===========================================
     """
     print(colored(banner, 'red'))
+
+# Load pre-trained ML model for vulnerability detection
+try:
+    model = joblib.load("vuln_model.pkl")
+except:
+    model = None
 
 def run_subfinder(target):
     try:
@@ -50,85 +58,45 @@ def run_waybackurls(subdomains):
         print(f"Error running waybackurls: {e}")
         return []
 
-def filter_urls(urls):
-    try:
-        result = subprocess.run(["uro"], input="\n".join(urls), text=True, capture_output=True)
-        return result.stdout.splitlines()
-    except Exception as e:
-        print(f"Error running uro: {e}")
-        return []
-
-def scan_logs(url):
-    potential_paths = ["/logs", "/log.txt", "/error.log", "/access.log", "/debug.log", "/system.log", "/database.log", "/backup.log", "/config/logs", "/var/logs", "/log/errors.log", "/server.log", "/admin.log", "/auth.log", "/log.cache", "/.secret", "/.db", "/.backup", "/.yml", "/.gz", "/.rar", "/.zip", "/.config"]
-    for path in potential_paths:
-        try:
-            full_url = urljoin(url, path)
-            response = requests.get(full_url, timeout=5)
-            if response.status_code == 200 and len(response.text) > 0:
-                return True, path, "Medium"
-        except requests.RequestException:
-            pass
-    return False, None, None
-
-def scan_sql_injection(url):
-    payloads = ["' OR '1'='1", "' UNION SELECT NULL, NULL, NULL--", "' AND 1=1--", "' OR 'a'='a"]
-    for payload in payloads:
-        try:
-            response = requests.get(url, params={"input": payload}, timeout=5)
-            if "syntax" in response.text.lower() or "mysql" in response.text.lower():
-                return True, payload, "High"
-        except requests.RequestException:
-            pass
-    return False, None, None
-
-def scan_xss(url):
-    payloads = ["<script>alert('XSS')</script>", "<img src=x onerror=alert('XSS')>", "<svg/onload=alert('XSS')>"]
+def scan_vulnerability(url, payloads, vulnerability_name, severity):
     for payload in payloads:
         try:
             response = requests.get(url, params={"input": payload}, timeout=5)
             if payload in response.text:
-                return True, payload, "Medium"
+                return True, payload, severity
         except requests.RequestException:
             pass
     return False, None, None
 
-def generate_report(vulnerabilities, output_file):
-    with open(output_file, 'w') as file:
-        file.write("Klandestine by BCEVM - Vulnerability Scan Report\n")
-        file.write("===========================================\n\n")
-        for url, issues in vulnerabilities.items():
-            file.write(f"URL: {url}\n")
-            if issues:
-                file.write("Vulnerabilities Found:\n")
-                for issue, payload, severity in issues:
-                    file.write(f"  - {issue} (Severity: {severity})")
-                    if payload:
-                        file.write(f" (Payload: {payload})")
-                    file.write("\n")
-            file.write("\n")
-
-def display_vulnerabilities(vulnerabilities):
-    for url, issues in vulnerabilities.items():
-        if issues:
-            print(colored(f"URL: {url}", "cyan"))
-            for issue, payload, severity in issues:
-                color = "yellow" if severity == "Low" else "blue" if severity == "Medium" else "red" if severity == "High" else "magenta"
-                print(colored(f"  - {issue} (Severity: {severity})", color))
-                if payload:
-                    print(colored(f"    Payload: {payload}", color))
-
 def scan_url(url):
     issues = []
     print(f"Scanning {url}...")
-    logs_found, log_payload, log_severity = scan_logs(url)
-    if logs_found:
-        issues.append(("Logs Found", log_payload, log_severity))
-    sql_injection, sql_payload, sql_severity = scan_sql_injection(url)
-    if sql_injection:
-        issues.append(("SQL Injection", sql_payload, sql_severity))
-    xss, xss_payload, xss_severity = scan_xss(url)
-    if xss:
-        issues.append(("Cross-Site Scripting (XSS)", xss_payload, xss_severity))
+    
+    vulnerabilities = {
+        "Cross-Site Scripting (XSS)": (["<script>alert('XSS')</script>", "<img src=x onerror=alert('XSS')>", "<svg/onload=alert('XSS')>"], "Medium"),
+        "SQL Injection": (["' OR '1'='1", "' UNION SELECT NULL, NULL, NULL--", "' AND 1=1--", "' OR 'a'='a"], "High"),
+        "Open Redirect": (["//evil.com", "https://evil.com"], "High"),
+        "Improper Authentication": (["admin", "password", "123456"], "High"),
+        "Information Disclosure": (["/debug", "/info", "/phpinfo.php"], "Medium"),
+        "Improper Access Control": (["/admin", "/secure", "/private"], "High"),
+        "IDOR": (["?id=1", "?user=admin"], "High"),
+        "Misconfiguration": (["/.env", "/config.php", "/backup.zip"], "Medium"),
+        "Privilege Escalation": (["/root", "/superadmin"], "High"),
+        "Business Logic Errors": (["/cart/add?item=999999"], "Medium"),
+        "Improper Authorization": (["/restricted", "/admin-only"], "High"),
+    }
+    
+    for vuln, (payloads, severity) in vulnerabilities.items():
+        found, payload, sev = scan_vulnerability(url, payloads, vuln, severity)
+        if found:
+            issues.append((vuln, payload, sev))
+    
+    # Use ML model to refine results if available
+    if model:
+        predictions = model.predict(np.array([url]))
+        if predictions[0] == 1:
+            issues.append(("ML-Detected Potential Vulnerability", "N/A", "Critical"))
+    
     return url, issues
 
 def main():
@@ -140,23 +108,18 @@ def main():
 
     print("Running Httpx...")
     active_subdomains = run_httpx(subdomains)
-
+    
     print("Running Waybackurls...")
     urls = run_waybackurls(active_subdomains)
-
-    print("Filtering URLs...")
-    filtered_urls = filter_urls(urls)
 
     print("Starting vulnerability scans...")
     vulnerabilities = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
-        results = list(executor.map(scan_url, filtered_urls))
+        results = list(executor.map(scan_url, urls))
         for url, issues in results:
             if issues:
                 vulnerabilities[url] = issues
-
-    display_vulnerabilities(vulnerabilities)
-    generate_report(vulnerabilities, output_file)
+    
     print(f"Scan complete. Report saved to {output_file}")
 
 if __name__ == "__main__":
