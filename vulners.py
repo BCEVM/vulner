@@ -51,7 +51,7 @@ def run_waybackurls(subdomains):
     try:
         urls = []
         for subdomain in subdomains:
-            result = subprocess.run(["waybackurls", subdomain], capture_output=True, text=True)
+            result = subprocess.run(["waybackurls"], input=subdomain, capture_output=True, text=True)
             urls.extend(result.stdout.splitlines())
         return urls
     except Exception as e:
@@ -99,27 +99,44 @@ def scan_url(url):
     
     return url, issues
 
+def generate_report(vulnerabilities, output_file):
+    with open(output_file, 'w', encoding='utf-8') as file:
+        file.write("Vulnerability Scan Report\n")
+        file.write("===========================================\n\n")
+        for url, issues in vulnerabilities.items():
+            file.write(f"URL: {url}\n")
+            if issues:
+                file.write("Vulnerabilities Found:\n")
+                for issue, payload, severity in issues:
+                    color = "yellow" if severity == "Low" else "blue" if severity == "Medium" else "red" if severity == "High" else "magenta"
+                    file.write(f"  - {issue} (Severity: {severity})")
+                    if payload:
+                        file.write(f" (Payload: {payload})")
+                    file.write("\n")
+            file.write("\n")
+
 def main():
     target = input("Enter target domain: ").strip()
     output_file = input("Enter output filename (e.g., results.txt): ").strip()
     
-    print("Running Subfinder...")
+    print("Scanning proses 1...")
     subdomains = run_subfinder(target)
 
-    print("Running Httpx...")
+    print("Running proses 2...")
     active_subdomains = run_httpx(subdomains)
     
-    print("Running Waybackurls...")
+    print("Running proses 3...")
     urls = run_waybackurls(active_subdomains)
 
     print("Starting vulnerability scans...")
     vulnerabilities = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=1000) as executor:
         results = list(executor.map(scan_url, urls))
         for url, issues in results:
             if issues:
                 vulnerabilities[url] = issues
     
+    generate_report(vulnerabilities, output_file)
     print(f"Scan complete. Report saved to {output_file}")
 
 if __name__ == "__main__":
