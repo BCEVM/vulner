@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 from termcolor import colored
 from bs4 import BeautifulSoup
 import logging
-import configparser
 import schedule
 import time
 import smtplib
@@ -19,16 +18,6 @@ import matplotlib.pyplot as plt
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Load configuration
-config = configparser.ConfigParser()
-config.read('config.ini')
-GITHUB_REPO = config['DEFAULT']['GITHUB_REPO']
-EMAIL_SENDER = config['EMAIL']['SENDER']
-EMAIL_RECEIVER = config['EMAIL']['RECEIVER']
-EMAIL_SERVER = config['EMAIL']['SERVER']
-EMAIL_PORT = config['EMAIL']['PORT']
-EMAIL_PASSWORD = config['EMAIL']['PASSWORD']
 
 def print_banner():
     banner = """
@@ -161,8 +150,8 @@ def generate_visual_report(vulnerabilities, output_image):
 
 def send_notification(subject, body, attachment=None):
     msg = MIMEMultipart()
-    msg['From'] = EMAIL_SENDER
-    msg['To'] = EMAIL_RECEIVER
+    msg['From'] = 'your_email@example.com'
+    msg['To'] = 'receiver_email@example.com'
     msg['Subject'] = subject
 
     msg.attach(MIMEText(body, 'plain'))
@@ -178,16 +167,16 @@ def send_notification(subject, body, attachment=None):
             )
             msg.attach(part)
 
-    server = smtplib.SMTP(EMAIL_SERVER, EMAIL_PORT)
+    server = smtplib.SMTP('smtp.example.com', 587)
     server.starttls()
-    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+    server.login('your_email@example.com', 'your_password')
     text = msg.as_string()
-    server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, text)
+    server.sendmail('your_email@example.com', 'receiver_email@example.com', text)
     server.quit()
 
 def perform_scan():
-    target = config['SCAN']['TARGET']
-    output_file = config['SCAN']['OUTPUT_FILE']
+    target = 'example.com'
+    output_file = 'scan_report.txt'
     
     logger.info("Scanning proses 1...")
     subdomains = run_subfinder(target)
@@ -212,7 +201,7 @@ def perform_scan():
 
 def main():
     print_banner()
-    schedule.every().day.at(config['SCHEDULE']['TIME']).do(perform_scan)
+    schedule.every().day.at("00:00").do(perform_scan)
     while True:
         schedule.run_pending()
         time.sleep(1)
