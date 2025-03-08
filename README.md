@@ -4,4 +4,7 @@ harus install
 3. waybackurls
 4. uro
 
-Update tools python3 vulners.py -update
+penulisan domain tanpa http/https
+hanya google.com ( contoh )
+
+Update tools python3 vulners.py -update jika ada update
